@@ -1,7 +1,7 @@
 import os
 import streamlit as st
 import json
-from PIL import Image
+from PIL import Image, ImageStat
 import io
 import fitz  # PyMuPDF for PDF handling
 from typing import List
@@ -80,10 +80,34 @@ def process_pdf_to_images(pdf_bytes: bytes) -> List[dict]:
         image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
 
         aspect_ratio = pix.width / float(pix.height)
-        should_split = pix.width > pix.height and aspect_ratio > 1.3
+        midpoint = pix.width // 2
+
+        # Look for a bright, low-text gutter around the center to avoid
+        # splitting ordinary landscape pages that lack a clear divider.
+        gutter_width = max(10, int(pix.width * 0.06))
+        gray_page = image.convert("L")
+        center_band = gray_page.crop(
+            (
+                midpoint - gutter_width // 2,
+                0,
+                midpoint + gutter_width // 2,
+                pix.height,
+            )
+        )
+        page_stats = ImageStat.Stat(gray_page)
+        center_stats = ImageStat.Stat(center_band)
+        center_blankish = (
+            center_stats.mean[0] > page_stats.mean[0] + 5
+            and center_stats.stddev[0] < 25
+        )
+
+        should_split = (
+            pix.width > pix.height
+            and aspect_ratio > 1.3
+            and center_blankish
+        )
 
         if should_split:
-            midpoint = pix.width // 2
             left_img = image.crop((0, 0, midpoint, pix.height))
             right_img = image.crop((midpoint, 0, pix.width, pix.height))
             images.append({"image": left_img, "page_number": page_num + 1, "part": 1})

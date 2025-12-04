@@ -67,9 +67,9 @@ found, mark it as "Not Found".""",
     "Custom": ""
 }
 
-def process_pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]:
-    """Convert PDF pages to images"""
-    images = []
+def process_pdf_to_images(pdf_bytes: bytes) -> List[dict]:
+    """Convert PDF pages to images and split obvious two-up scans."""
+    images: list[dict] = []
     pdf_document = fitz.open(stream=pdf_bytes, filetype="pdf")
 
     for page_num in range(len(pdf_document)):
@@ -77,8 +77,19 @@ def process_pdf_to_images(pdf_bytes: bytes) -> List[Image.Image]:
         # Render page to image at higher resolution
         pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
         img_bytes = pix.tobytes("png")
-        image = Image.open(io.BytesIO(img_bytes))
-        images.append(image)
+        image = Image.open(io.BytesIO(img_bytes)).convert("RGB")
+
+        aspect_ratio = pix.width / float(pix.height)
+        should_split = pix.width > pix.height and aspect_ratio > 1.3
+
+        if should_split:
+            midpoint = pix.width // 2
+            left_img = image.crop((0, 0, midpoint, pix.height))
+            right_img = image.crop((midpoint, 0, pix.width, pix.height))
+            images.append({"image": left_img, "page_number": page_num + 1, "part": 1})
+            images.append({"image": right_img, "page_number": page_num + 1, "part": 2})
+        else:
+            images.append({"image": image, "page_number": page_num + 1, "part": None})
 
     pdf_document.close()
     return images
@@ -276,14 +287,19 @@ def extract_text_with_api(
             image = Image.open(io.BytesIO(file_bytes))
             if image.mode != 'RGB':
                 image = image.convert('RGB')
-            images = [image]
+            images = [{"image": image, "page_number": 1, "part": None}]
 
         all_structured_outputs = []
         all_raw_outputs = []
         page_contents = []
 
         # Process each page
-        for i, img in enumerate(images):
+        for i, page_info in enumerate(images):
+            img = page_info["image"]
+            page_label = f"Page {page_info['page_number']}"
+            if page_info.get("part"):
+                page_label += f" (part {page_info['part']})"
+
             raw = extract_with_mistral(img, MISTRAL_API_KEY)
             structured = raw
             if prompt.strip():
@@ -293,10 +309,11 @@ def extract_text_with_api(
                     MISTRAL_API_KEY,
                 )
 
-            all_structured_outputs.append(f"--- Page {i+1} ---\n{structured}\n")
-            all_raw_outputs.append(f"--- Page {i+1} ---\n{raw}\n")
+            all_structured_outputs.append(f"--- {page_label} ---\n{structured}\n")
+            all_raw_outputs.append(f"--- {page_label} ---\n{raw}\n")
             page_contents.append({
-                "page_number": i + 1,
+                "page_number": page_info["page_number"],
+                "part": page_info.get("part"),
                 "structured": structured,
                 "raw": raw
             })
@@ -401,11 +418,20 @@ def main():
                                 commodity_df_safe = make_arrow_compatible(commodity_df)
 
                                 st.markdown("**General Information:**")
-                                st.dataframe(general_df_safe, use_container_width=True)
+                                st.data_editor(
+                                    general_df_safe,
+                                    use_container_width=True,
+                                    key="general_info_editor",
+                                )
 
                                 st.markdown("**Commodity Details:**")
                                 if not commodity_df.empty:
-                                    st.dataframe(commodity_df_safe, use_container_width=True)
+                                    st.data_editor(
+                                        commodity_df_safe,
+                                        use_container_width=True,
+                                        num_rows="dynamic",
+                                        key="commodity_editor",
+                                    )
                                 else:
                                     st.info("No commodity-level data was detected in the structured output.")
                             else:

@@ -390,68 +390,28 @@ def main():
                     )
 
                     if raw_text and not extracted_data.startswith("Error:"):
-                        # Create tabs for different views
-                        tab1, tab2 = st.tabs(["📋 Structured Data", "📄 Raw Text"])
+                        st.markdown("**Extracted Structured Data:**")
 
-                        with tab1:
-                            st.markdown("**Extracted Structured Data:**")
+                        if extraction_prompt.strip():
+                            json_result = extract_json_from_text(extracted_data)
 
-                            if extraction_prompt.strip():
-                                # Try to parse as JSON
-                                json_result = extract_json_from_text(extracted_data)
+                            if json_result:
+                                general_df, commodity_df = split_structured_output(json_result)
+                                general_df_safe = make_arrow_compatible(general_df)
+                                commodity_df_safe = make_arrow_compatible(commodity_df)
 
-                                if json_result:
-                                    st.json(json_result)
-                                    general_df, commodity_df = split_structured_output(json_result)
-                                    general_df_safe = make_arrow_compatible(general_df)
-                                    commodity_df_safe = make_arrow_compatible(commodity_df)
+                                st.markdown("**General Information:**")
+                                st.dataframe(general_df_safe, use_container_width=True)
 
-                                    st.markdown("**General Information:**")
-                                    st.dataframe(general_df_safe, use_container_width=True)
-
-                                    st.markdown("**Commodity Details:**")
-                                    if not commodity_df.empty:
-                                        st.dataframe(commodity_df_safe, use_container_width=True)
-                                    else:
-                                        st.info("No commodity-level data was detected in the structured output.")
+                                st.markdown("**Commodity Details:**")
+                                if not commodity_df.empty:
+                                    st.dataframe(commodity_df_safe, use_container_width=True)
                                 else:
-                                    st.code(extracted_data, language="text")
-
-                                    # Download button for text
-                                    st.download_button(
-                                        label="⬇️ Download Text",
-                                        data=extracted_data,
-                                        file_name="extracted_data.txt",
-                                        mime="text/plain"
-                                    )
+                                    st.info("No commodity-level data was detected in the structured output.")
                             else:
-                                st.markdown(extracted_data)
-
-                            st.markdown("---")
-
-                        with tab2:
-                            st.markdown("**Raw Extracted Text:**")
-
-                            # Display page by page
-                            if page_contents:
-                                for page_info in page_contents:
-                                    with st.expander(f"📄 Page {page_info['page_number']}", expanded=True):
-                                        st.text(page_info['raw'])
-                            else:
-                                st.text_area(
-                                    "Extracted Text",
-                                    value=raw_text,
-                                    height=400,
-                                    disabled=True
-                                )
-
-                            # Download button for raw text
-                            st.download_button(
-                                label="⬇️ Download Raw Text",
-                                data=raw_text,
-                                file_name="extracted_text.txt",
-                                mime="text/plain"
-                            )
+                                st.error("Unable to parse structured data into tables.")
+                        else:
+                            st.error("No extraction prompt provided to structure the data.")
 
                         st.success("✅ Extraction completed successfully!")
                     else:
